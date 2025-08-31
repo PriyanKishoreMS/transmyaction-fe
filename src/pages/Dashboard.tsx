@@ -1,7 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import type { ColDef } from "ag-grid-community";
-import "ag-grid-community/styles/ag-grid.css";
-import "ag-grid-community/styles/ag-theme-alpine.css";
+import {
+	colorSchemeDarkBlue,
+	themeBalham,
+	type ColDef,
+	type FilterChangedEvent,
+	type GridApi,
+	type GridReadyEvent,
+} from "ag-grid-community";
 import { AgGridReact } from "ag-grid-react";
 import {
 	ArcElement,
@@ -23,11 +28,14 @@ import {
 	CreditCard,
 	DollarSign,
 	Filter,
+	LogOut,
 	PieChart,
+	Search,
 	TrendingDown,
 	TrendingUp,
+	XIcon,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Bar, Line, Pie } from "react-chartjs-2";
 import { useAuth } from "../contexts/AuthContext";
 import { BASE_URL, useApi } from "../utils/api";
@@ -103,30 +111,28 @@ const Dashboard: React.FC = () => {
 		from: "",
 		to: "",
 	});
-	const [lastMonth, setLastMonth] = useState<{ year: number; month: number }>(
-		() => {
-			const now = new Date();
-			let year = now.getFullYear();
-			let month = now.getMonth(); // Previous month
-			if (month === 0) {
-				month = 12;
-				year -= 1;
-			}
-			return { year, month };
+	const [lastMonth, _] = useState<{ year: number; month: number }>(() => {
+		const now = new Date();
+		let year = now.getFullYear();
+		let month = now.getMonth(); // Previous month
+		if (month === 0) {
+			month = 12;
+			year -= 1;
 		}
-	);
+		return { year, month };
+	});
 
 	useEffect(() => {
 		console.log("in dashboard");
 	}, []);
 
-	const email = "postcardbox20@gmail.com";
-	// const email = "laksitha2004@gmail.com";
-	// const email = "muga1982mspl@gmail.com";
-
 	const ipaddr = BASE_URL;
 	const { fetchWithToken } = useApi();
 	const { user } = useAuth();
+	const username = user?.username.replace("+", " ");
+
+	const greenbg = "#10b981";
+	const redbg = "#ef4444";
 
 	// Build API URL based on filter
 	const buildApiUrl = () => {
@@ -173,7 +179,7 @@ const Dashboard: React.FC = () => {
 		isLoading,
 		error,
 	} = useQuery<Transaction[]>({
-		queryKey: ["transactions", dateFilter, currentMonth, customDateRange],
+		queryKey: ["transactions", currentMonth],
 		queryFn: async () => {
 			const url = buildApiUrl();
 			console.log("Fetching from:", url);
@@ -186,8 +192,33 @@ const Dashboard: React.FC = () => {
 		// refetchInterval: 30000, // Refresh every 30 seconds
 	});
 
+	const themeDarkBlue = themeBalham.withPart(colorSchemeDarkBlue);
+	// const [allTransactions, setAllTransactions] = useState([]); // Your original data
+
 	// No need for client-side filtering since backend handles it
 	const filteredTransactions = transactions;
+	const { logout } = useAuth();
+	const [gridApi, setGridApi] = useState<GridApi | null>(null);
+	const [totalAmount, setTotalAmount] = useState<number>(0);
+
+	const calculateVisibleTotal = (api: GridApi): number => {
+		if (!api) return 0;
+
+		let total = 0;
+		api.forEachNodeAfterFilter(node => {
+			if (node.data) {
+				total +=
+					node.data.txnType === "credit" ? node.data.amount : -node.data.amount;
+			}
+		});
+		return total;
+	};
+
+	// Update total when grid filtering changes
+	const onFilterChanged = useCallback((params: FilterChangedEvent): void => {
+		const newTotal = calculateVisibleTotal(params.api);
+		setTotalAmount(newTotal);
+	}, []);
 
 	// Calculate dashboard statistics
 	const stats: DashboardStats | null = useMemo(() => {
@@ -264,24 +295,25 @@ const Dashboard: React.FC = () => {
 		// Daily trends instead of monthly for better granularity
 		const dailyMap = new Map<string, { credit: number; debit: number }>();
 		filteredTransactions.forEach(txn => {
-			const date = new Date(txn.txnDatetime).toLocaleDateString("en-IN", {
-				day: "2-digit",
-				month: "short",
-			});
-			const existing = dailyMap.get(date) || { credit: 0, debit: 0 };
+			const fullDate = new Date(txn.txnDatetime).toISOString().split("T")[0]; // YYYY-MM-DD format
+			const existing = dailyMap.get(fullDate) || { credit: 0, debit: 0 };
 			if (txn.txnType === "credit") {
 				existing.credit += txn.amount;
 			} else {
 				existing.debit += txn.amount;
 			}
-			dailyMap.set(date, existing);
+			dailyMap.set(fullDate, existing);
 		});
 
 		const monthlyTrends = Array.from(dailyMap.entries())
-			.map(([date, data]) => ({ month: date, ...data }))
-			.sort(
-				(a, b) => new Date(a.month).getTime() - new Date(b.month).getTime()
-			);
+			.sort(([dateA], [dateB]) => dateA.localeCompare(dateB)) // Sort by YYYY-MM-DD string
+			.map(([fullDate, data]) => ({
+				month: new Date(fullDate).toLocaleDateString("en-IN", {
+					day: "2-digit",
+					month: "short",
+				}),
+				...data,
+			}));
 
 		// Transactions by method
 		const methodMap = new Map<string, number>();
@@ -310,59 +342,114 @@ const Dashboard: React.FC = () => {
 		};
 	}, [filteredTransactions]);
 
+	const pinnedBottomData = useMemo(
+		() => [
+			{
+				txnType: "",
+				amount: totalAmount,
+				counterParty: "TOTAL",
+				txnDatetime: "",
+				txnMethod: "",
+				txnRef: "",
+			},
+		],
+		[totalAmount]
+	);
+
 	// AG Grid column definitions
 	const columnDefs: ColDef[] = [
 		{
 			headerName: "Type",
 			field: "txnType",
 			width: 80,
-			cellRenderer: (params: any) => (
-				<span
-					className={`badge ${
-						params.value === "credit" ? "badge-success" : "badge-error"
-					}`}
-				>
-					{params.value}
-				</span>
-			),
+
+			cellRenderer: (params: any) => {
+				if (params.node.rowPinned)
+					return <span className='font-bold text-primary'>TOTAL</span>;
+				return (
+					<span
+						className={`badge badge-sm  font-bold ${
+							params.value === "credit"
+								? "badge-success text-green-100 bg-green-500/20"
+								: "badge-error text-red-100 bg-red-500/20"
+						}`}
+					>
+						{params.value}
+					</span>
+				);
+			},
 		},
 		{
 			headerName: "Amount",
 			field: "amount",
 			width: 100,
-			cellRenderer: (params: any) => (
-				<span
-					className={
-						params.data.txnType === "credit" ? "text-success" : "text-error"
-					}
-				>
-					₹{params.value.toLocaleString()}
-				</span>
-			),
+			cellRenderer: (params: any) => {
+				const isTotal = params.node.rowPinned;
+				const amount = params.value;
+
+				if (isTotal) {
+					return (
+						<span className='text-primary font-bold text-base'>
+							₹{amount.toLocaleString()}
+						</span>
+					);
+				}
+
+				return (
+					<span
+						className={
+							params.data.txnType === "credit"
+								? "text-success font-bold"
+								: "text-error font-bold"
+						}
+					>
+						₹{amount.toLocaleString()}
+					</span>
+				);
+			},
 		},
-		{
-			headerName: "Transaction Mode",
-			field: "txnMode",
-			flex: 1,
-			minWidth: 150,
-		},
+		// {
+		// 	headerName: "Transaction Mode",
+		// 	field: "txnMode",
+		// 	flex: 1,
+		// 	minWidth: 150,
+		// },
 		{
 			headerName: "Counter Party",
 			field: "counterParty",
 			flex: 1,
 			minWidth: 150,
+
+			cellRenderer: (params: any) => {
+				if (params.node.rowPinned) return "";
+				return <span>{params.value}</span>;
+			},
 		},
-		{ headerName: "Method", field: "txnMethod", width: 100 },
 		{
 			headerName: "Date",
 			field: "txnDatetime",
 			width: 120,
-			valueFormatter: (params: any) =>
-				new Date(params.value).toLocaleDateString("en-IN", {
-					day: "2-digit",
-					month: "short",
-				}),
+			// valueFormatter: (params: any) =>
+			// 	new Date(params.value).toLocaleDateString("en-IN", {
+			// 		day: "2-digit",
+			// 		month: "short",
+			// 		// timeStyle: "medium",
+			// 	}),
+
+			cellRenderer: (params: any) => {
+				if (params.node.rowPinned) return "";
+				return (
+					<span>
+						{new Date(params.value).toLocaleDateString("en-IN", {
+							day: "2-digit",
+							month: "short",
+							// timeStyle: "medium",
+						})}
+					</span>
+				);
+			},
 		},
+		{ headerName: "Method", field: "txnMethod", width: 100 },
 		{ headerName: "Reference", field: "txnRef", width: 130 },
 	];
 
@@ -372,9 +459,9 @@ const Dashboard: React.FC = () => {
 		datasets: [
 			{
 				data: [stats?.totalCredit || 0, stats?.totalDebit || 0],
-				backgroundColor: ["#10b981", "#ef4444"],
-				borderWidth: 2,
-				borderColor: "#1f2937",
+				backgroundColor: [greenbg, redbg],
+				borderWidth: 1,
+				borderColor: "#ffffff50",
 			},
 		],
 	};
@@ -385,7 +472,7 @@ const Dashboard: React.FC = () => {
 			{
 				label: "Credit Amount (₹)",
 				data: stats?.topCreditCounterParties.map(cp => cp.amount || 0),
-				backgroundColor: "#10b981",
+				backgroundColor: greenbg,
 				borderColor: "#059669",
 				borderWidth: 1,
 			},
@@ -398,7 +485,7 @@ const Dashboard: React.FC = () => {
 			{
 				label: "Debit Amount (₹)",
 				data: stats?.topDebitCounterParties.map(cp => cp.amount || 0),
-				backgroundColor: "#ef4444",
+				backgroundColor: redbg,
 				borderColor: "#dc2626",
 				borderWidth: 1,
 			},
@@ -411,22 +498,22 @@ const Dashboard: React.FC = () => {
 			{
 				label: "Credits",
 				data: stats?.monthlyTrends.map(mt => mt.credit || 0),
-				borderColor: "#10b981",
-				backgroundColor: "#10b981",
+				borderColor: greenbg,
+				backgroundColor: greenbg,
 				tension: 0.1,
 				fill: false,
-				pointBackgroundColor: "#10b981",
+				pointBackgroundColor: greenbg,
 				pointBorderColor: "#059669",
 				pointRadius: 4,
 			},
 			{
 				label: "Debits",
 				data: stats?.monthlyTrends.map(mt => mt.debit || 0),
-				borderColor: "#ef4444",
-				backgroundColor: "#ef4444",
+				borderColor: redbg,
+				backgroundColor: redbg,
 				tension: 0.1,
 				fill: false,
-				pointBackgroundColor: "#ef4444",
+				pointBackgroundColor: redbg,
 				pointBorderColor: "#dc2626",
 				pointRadius: 4,
 			},
@@ -468,20 +555,28 @@ const Dashboard: React.FC = () => {
 		},
 	};
 
-	// if (
-	// 	stats.totalCredit === 0 &&
-	// 	stats.totalDebit === 0 &&
-	// 	filteredTransactions.length === 0 &&
-	// 	!isLoading
-	// ) {
-	// 	return (
-	// 		<div className='flex items-center justify-center min-h-screen bg-base-100'>
-	// 			<div className='alert alert-info'>
-	// 				<span>No transactions found</span>
-	// 			</div>
-	// 		</div>
-	// 	);
-	// }
+	const gridRef = useRef<AgGridReact>(null);
+
+	const onTxnFilterChanged = useCallback(
+		(event: any) => {
+			if (gridApi) {
+				gridApi.setGridOption("quickFilterText", event.target.value);
+			}
+			// gridRef.current!.api.setGridOption(
+			// 	"quickFilterText",
+			// 	(document.getElementById("txnFilterInput") as HTMLInputElement).value
+			// );
+		},
+		[gridApi]
+	);
+
+	// const onTxnFilterChanged = (
+	// 	event: React.ChangeEvent<HTMLInputElement>
+	// ): void => {
+	// 	if (gridApi) {
+	// 		gridApi.setQuickFilter(event.target.value);
+	// 	}
+	// };
 
 	if (isLoading) {
 		return (
@@ -507,9 +602,9 @@ const Dashboard: React.FC = () => {
 				{/* Header */}
 				<div className='flex flex-col w-full items-center sm:flex-row justify-between md:text-left text-center md:items-center my-6 gap-5'>
 					<div className='w-full'>
-						<div className='flex items-center md:justify-start justify-center'>
-							<h1 className='text-3xl sm:text-4xl font-bold text-base-content'>
-								trans ma action, nihao
+						<div className='flex items-center md:justify-start justify-center gap-2'>
+							<h1 className='text-3xl sm:text-4xl font-bold items-center text-base-content'>
+								{username}'s Dashboard
 							</h1>
 							<img src='/sussy.png' className='w-10' alt='' />
 						</div>
@@ -518,34 +613,67 @@ const Dashboard: React.FC = () => {
 
 					{/* Filter Controls */}
 					<div className='flex flex-col w-full md:items-end items-center gap-4'>
-						<div className='flex gap-2 flex-wrap'>
+						<div className='flex flex-between lg:gap-2 gap-1'>
 							<button
 								onClick={() => setDateFilter("monthly")}
 								className={`btn btn-sm ${
-									dateFilter === "monthly" ? "btn-primary" : "btn-outline"
+									dateFilter === "monthly" ? "btn-primary" : "btn-soft"
 								}`}
 							>
 								<Calendar className='w-4 h-4' />
 								Monthly
 							</button>
-							<button
+							{/* <button
 								onClick={() => setDateFilter("7d")}
 								className={`btn btn-sm ${
-									dateFilter === "7d" ? "btn-primary" : "btn-outline"
+									dateFilter === "7d" ? "btn-primary" : "btn-soft"
 								}`}
 							>
 								<Activity className='w-4 h-4' />
 								Last Week
-							</button>
+							</button> */}
 							<button
 								onClick={() => setDateFilter("custom")}
 								className={`btn btn-sm ${
-									dateFilter === "custom" ? "btn-primary" : "btn-outline"
+									dateFilter === "custom" ? "btn-primary" : "btn-soft"
 								}`}
 							>
 								<Filter className='w-4 h-4' />
 								Custom
 							</button>
+							<button
+								className='btn btn-sm btn-error btn-soft'
+								onClick={() => {
+									(
+										document.getElementById("my_modal_2") as HTMLDialogElement
+									)?.showModal();
+								}}
+							>
+								<LogOut className='w-4 h-4' />
+								Logout
+							</button>
+							<dialog id='my_modal_2' className='modal'>
+								<div className='modal-box'>
+									<h3 className='font-bold text-lg'>Logout</h3>
+									<p className='py-4'>Are you sure you want to logout?</p>
+									<div className='flex items-end justify-end gap-2 w-full'>
+										<button className='btn btn-error btn-soft' onClick={logout}>
+											Logout
+											<LogOut className='w-4 h-4' />
+										</button>
+
+										<form method='dialog'>
+											<button className='btn btn-small btn-soft'>
+												Cancel
+												<XIcon className='w-4 h-4' />
+											</button>
+										</form>
+									</div>
+								</div>
+								<form method='dialog' className='modal-backdrop'>
+									<button>close</button>
+								</form>
+							</dialog>
 						</div>
 
 						{/* Monthly Navigation */}
@@ -553,7 +681,7 @@ const Dashboard: React.FC = () => {
 							<div className='flex items-center justify-center gap-2'>
 								<button
 									onClick={() => navigateMonth("prev")}
-									className='btn btn-sm btn-circle btn-outline'
+									className='btn btn-sm btn-circle btn-soft'
 								>
 									<ChevronLeft />
 								</button>
@@ -562,7 +690,7 @@ const Dashboard: React.FC = () => {
 								</span>
 								<button
 									onClick={() => navigateMonth("next")}
-									className='btn btn-sm btn-circle btn-outline'
+									className='btn btn-sm btn-circle btn-soft'
 									disabled={
 										currentMonth.month == lastMonth.month + 1 &&
 										currentMonth.year == lastMonth.year
@@ -572,6 +700,8 @@ const Dashboard: React.FC = () => {
 								</button>
 							</div>
 						)}
+
+						<div className='flex items-center justify-center'></div>
 					</div>
 				</div>
 
@@ -677,7 +807,7 @@ const Dashboard: React.FC = () => {
 				</div>
 
 				{/* Tabs */}
-				<div className='tabs tabs-bordered mb-4'>
+				<div className='tabs tabs-box mb-4 md:justify-start justify-between'>
 					<a
 						className={`tab ${selectedTab === "overview" ? "tab-active" : ""}`}
 						onClick={() => setSelectedTab("overview")}
@@ -812,13 +942,24 @@ const Dashboard: React.FC = () => {
 				{selectedTab === "transactions" && (
 					<div className='card bg-base-200 shadow'>
 						<div className='card-body'>
-							<h2 className='card-title text-lg mb-4'>Recent Transactions</h2>
-							<div
-								className='ag-theme-alpine-dark h-[550px] w-full'
-								style={{ fontSize: "14px" }}
-							>
+							<div className='w-full flex md:flex-row gap-2 flex-col items-center justify-between mb-4'>
+								<h2 className='card-title text-lg'>Recent Transactions</h2>
+								<label className='input'>
+									<Search size={15} />
+									<input
+										type='text'
+										id='txnFilterInput'
+										placeholder='Search transactions...'
+										onInput={onTxnFilterChanged}
+									/>
+								</label>
+							</div>
+							<div className='h-[600px] w-full' style={{ fontSize: "14px" }}>
 								<AgGridReact
+									ref={gridRef}
+									theme={themeDarkBlue}
 									rowData={filteredTransactions}
+									pinnedBottomRowData={pinnedBottomData}
 									columnDefs={columnDefs}
 									defaultColDef={{
 										sortable: true,
@@ -831,10 +972,14 @@ const Dashboard: React.FC = () => {
 									paginationPageSize={20}
 									domLayout='normal'
 									suppressHorizontalScroll={false}
-									onGridReady={params => {
-										console.log("Grid ready with data:", filteredTransactions);
+									onGridReady={(params: GridReadyEvent) => {
+										setGridApi(params.api);
 										params.api.sizeColumnsToFit();
+										// Calculate initial total
+										const initialTotal = calculateVisibleTotal(params.api);
+										setTotalAmount(initialTotal);
 									}}
+									onFilterChanged={onFilterChanged}
 								/>
 							</div>
 						</div>
@@ -853,9 +998,7 @@ const Dashboard: React.FC = () => {
 											key={idx}
 											className='flex justify-between items-center'
 										>
-											<span className='badge badge-outline'>
-												{method.method}
-											</span>
+											<span className='badge badge-soft'>{method.method}</span>
 											<span className='font-semibold'>
 												{method.count} transactions
 											</span>
