@@ -1,8 +1,10 @@
 import { useAuth } from "../contexts/AuthContext";
 
-const prod = false;
+const prod = true;
 
-export const BASE_URL = prod ? "" : "http://localhost:3000";
+export const BASE_URL = prod
+	? "https://api-txns.priyankishore.dev"
+	: "http://localhost:3000";
 
 export const useApi = () => {
 	const { accessToken, refreshToken, logout, reloadTokens } = useAuth();

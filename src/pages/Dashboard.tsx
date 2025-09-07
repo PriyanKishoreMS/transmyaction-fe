@@ -30,6 +30,7 @@ import {
 	Filter,
 	LogOut,
 	PieChart,
+	RefreshCcw,
 	Search,
 	TrendingDown,
 	TrendingUp,
@@ -191,6 +192,30 @@ const Dashboard: React.FC = () => {
 		},
 		// refetchInterval: 30000, // Refresh every 30 seconds
 	});
+
+	const reloadData = async () => {
+		try {
+			const url = `${ipaddr}/txns/update`;
+			console.log("Posting to:", url);
+
+			const res = await fetchWithToken(url, {
+				method: "POST",
+				headers: {
+					"Content-Type": "application/json",
+				},
+			});
+
+			if (!res.ok) throw new Error("Failed to trigger update");
+
+			const data = await res.json();
+			console.log("Update response:", data);
+
+			// Optionally, refetch transactions after a delay
+			// queryClient.invalidateQueries(["transactions", currentMonth]);
+		} catch (err) {
+			console.error("Error triggering update:", err);
+		}
+	};
 
 	const themeDarkBlue = themeBalham.withPart(colorSchemeDarkBlue);
 	// const [allTransactions, setAllTransactions] = useState([]); // Your original data
@@ -642,17 +667,28 @@ const Dashboard: React.FC = () => {
 								Custom
 							</button>
 							<button
+								className='btn btn-sm btn-success btn-soft'
+								onClick={() => {
+									(
+										document.getElementById("reload_modal") as HTMLDialogElement
+									)?.showModal();
+								}}
+							>
+								<RefreshCcw className='w-4 h-4' />
+								Reload
+							</button>
+							<button
 								className='btn btn-sm btn-error btn-soft'
 								onClick={() => {
 									(
-										document.getElementById("my_modal_2") as HTMLDialogElement
+										document.getElementById("logout_modal") as HTMLDialogElement
 									)?.showModal();
 								}}
 							>
 								<LogOut className='w-4 h-4' />
 								Logout
 							</button>
-							<dialog id='my_modal_2' className='modal'>
+							<dialog id='logout_modal' className='modal'>
 								<div className='modal-box'>
 									<h3 className='font-bold text-lg'>Logout</h3>
 									<p className='py-4'>Are you sure you want to logout?</p>
@@ -661,6 +697,36 @@ const Dashboard: React.FC = () => {
 											Logout
 											<LogOut className='w-4 h-4' />
 										</button>
+
+										<form method='dialog'>
+											<button className='btn btn-small btn-soft'>
+												Cancel
+												<XIcon className='w-4 h-4' />
+											</button>
+										</form>
+									</div>
+								</div>
+								<form method='dialog' className='modal-backdrop'>
+									<button>close</button>
+								</form>
+							</dialog>
+							<dialog id='reload_modal' className='modal'>
+								<div className='modal-box'>
+									<h3 className='font-bold text-lg'>Reload</h3>
+									<p className='py-4'>
+										Click <span className='font-semibold'>Confirm</span> to
+										reload the data.
+									</p>
+									<div className='flex items-end justify-end gap-2 w-full'>
+										<form method='dialog'>
+											<button
+												className='btn btn-success btn-soft'
+												onClick={reloadData}
+											>
+												Reload
+												<RefreshCcw className='w-4 h-4' />
+											</button>
+										</form>
 
 										<form method='dialog'>
 											<button className='btn btn-small btn-soft'>

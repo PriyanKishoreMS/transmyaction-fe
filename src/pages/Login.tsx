@@ -184,10 +184,15 @@ const Login = () => {
 					{/* Footer */}
 					<div className='text-center mt-8'>
 						<p className='text-base-content/60 text-sm'>
-							<a href='#' className='link link-primary link-hover font-medium'>
+							<a
+								href='mailto:work@priyankishore.dev'
+								className='link link-primary link-hover font-medium'
+								target='_blank'
+								rel='noopener noreferrer'
+							>
 								Request to create Account.{" "}
 							</a>
-							Works with:
+							This works with:
 						</p>
 						<div className='flex items-center justify-center space-x-6 mt-6 text-xs text-base-content/50'>
 							<a href='#' className='link link-hover bg-white p-2 rounded'>
