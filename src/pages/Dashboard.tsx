@@ -30,14 +30,16 @@ import {
 	Filter,
 	LogOut,
 	PieChart,
+	Plus,
 	RefreshCcw,
 	Search,
 	TrendingDown,
 	TrendingUp,
 	XIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useMemo, useRef, useState } from "react";
 import { Bar, Line, Pie } from "react-chartjs-2";
+import AddTransactionModal from "../components/AddTransactionModal";
 import { useAuth } from "../contexts/AuthContext";
 import { BASE_URL, useApi } from "../utils/api";
 
@@ -122,10 +124,14 @@ const Dashboard: React.FC = () => {
 		}
 		return { year, month };
 	});
+	const [isModalOpen, setIsModalOpen] = useState(false);
+	const handleAddTransaction = () => {
+		setIsModalOpen(true);
+	};
 
-	useEffect(() => {
-		console.log("in dashboard");
-	}, []);
+	const handleCloseModal = () => {
+		setIsModalOpen(false);
+	};
 
 	const ipaddr = BASE_URL;
 	const { fetchWithToken } = useApi();
@@ -1010,15 +1016,36 @@ const Dashboard: React.FC = () => {
 						<div className='card-body'>
 							<div className='w-full flex md:flex-row gap-2 flex-col items-center justify-between mb-4'>
 								<h2 className='card-title text-lg'>Recent Transactions</h2>
-								<label className='input'>
-									<Search size={15} />
-									<input
-										type='text'
-										id='txnFilterInput'
-										placeholder='Search transactions...'
-										onInput={onTxnFilterChanged}
-									/>
-								</label>
+								<div className='flex gap-2'>
+									<button
+										className='btn lg:flex hidden btn-soft btn-primary'
+										onClick={handleAddTransaction}
+									>
+										<Plus />
+										Add Transaction
+									</button>
+									<button
+										className='btn lg:hidden flex btn-soft btn-primary'
+										onClick={handleAddTransaction}
+									>
+										<Plus />
+										Add
+									</button>
+									<label className='input'>
+										<Search size={15} />
+										<input
+											type='text'
+											id='txnFilterInput'
+											placeholder='Search transactions...'
+											onInput={onTxnFilterChanged}
+										/>
+									</label>
+								</div>
+								<AddTransactionModal
+									isOpen={isModalOpen}
+									onClose={handleCloseModal}
+									userEmail={user?.email}
+								/>
 							</div>
 							<div className='h-[600px] w-full' style={{ fontSize: "14px" }}>
 								<AgGridReact
